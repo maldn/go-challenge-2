@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,25 +21,20 @@ type SecureReader struct {
 
 // TODO pack nonce and actual encrypted message into one struct. encoding/binary
 func (sr *SecureReader) Read(p []byte) (n int, err error) {
-	//out would be appended to, but we always encrypt a new message (for now)
-	var enc []byte
+	// read encrypted message from onderlying reader
 	n, err = sr.r.Read(p)
+	if err != nil {
+		return n, err
+	}
+	//first 24 bytes is our nonce, rest is message
 	var nonce [24]byte
-	rand.Read(nonce[:])
-	copy(enc, p[:n])
-	//nonce = [24]byte{'1'}
-	p = p[:28]
-	dec, foo := box.Open(enc, p, &nonce, sr.pub, sr.priv)
-	fmt.Printf("%v\n%v\n%v\n%v\n", foo, p, enc, dec)
-	return n, err
-	/*
-		var nonce [24]byte
-		rand.Read(nonce[:])
-		encrypted := box.Seal(out, p, &nonce, sw.pub, sw.priv)
-		// write to underlying writer
-		return sw.w.Write(encrypted)
-
-		return sr.r.Read(p)*/
+	copy(nonce[:], p[:24])
+	decrypted, success := box.Open(nil, p[24:n], &nonce, sr.pub, sr.priv)
+	if success != true {
+		return 0, errors.New("Error decrypting message")
+	}
+	copy(p, decrypted)
+	return len(decrypted), err
 }
 
 // NewSecureReader instantiates a new SecureReader
@@ -51,13 +47,18 @@ type SecureWriter struct {
 	priv, pub *[32]byte
 }
 
+type RWC struct {
+	SecureReader
+	SecureWriter
+}
+
 func (sw *SecureWriter) Write(p []byte) (n int, err error) {
-	//out would be appended to, but we always encrypt a new message (for now)
-	var out []byte
+	//each "packet" starts with the nonce followed by the message
 	var nonce [24]byte
 	rand.Read(nonce[:])
-	nonce = [24]byte{'1'}
-	encrypted := box.Seal(out, p, &nonce, sw.pub, sw.priv)
+
+	encrypted := box.Seal(nonce[:], p, &nonce, sw.pub, sw.priv)
+	//fmt.Printf("WRITE: %v\n\t%v\n", encrypted, p)
 	// write to underlying writer
 	return sw.w.Write(encrypted)
 }
@@ -72,18 +73,30 @@ func NewSecureWriter(w io.Writer, priv, pub *[32]byte) io.Writer {
 // connects to the server, perform the handshake
 // and return a reader/writer.
 func Dial(addr string) (io.ReadWriteCloser, error) {
+	_, _, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
 // Serve starts a secure echo server on the given listener.
 func Serve(l net.Listener) error {
-	return nil
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return err
+		}
+		go func(c net.Conn) {
+
+		}(conn)
+	}
 }
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "greet"
-	app.Usage = "fight the loneliness!"
+	app.Name = "go-challenge-2"
+	app.Usage = "mooh"
 	app.Author = "Malte 'maldn' Böhme <malte.boehme@googlemail.com>"
 	app.Commands = []cli.Command{
 		{
@@ -109,6 +122,12 @@ func main() {
 					log.Fatalf("invalid port")
 				}
 				println("choosen port: ", p)
+				l, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
+				if err != nil {
+					log.Fatal(err)
+				}
+				defer l.Close()
+				log.Fatal(Serve(l))
 			},
 		},
 	}

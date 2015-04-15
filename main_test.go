@@ -4,16 +4,15 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"testing"
 )
 
 func TestReadWriterPing(t *testing.T) {
 	priv, pub := &[32]byte{'p', 'r', 'i', 'v'}, &[32]byte{'p', 'u', 'b'}
-
+	priv2, pub2 := &[32]byte{'p', 'r', 'i', '2'}, &[32]byte{'p', 'u', '2'}
 	r, w := io.Pipe()
 	secureR := NewSecureReader(r, priv, pub)
-	secureW := NewSecureWriter(w, priv, pub)
+	secureW := NewSecureWriter(w, priv2, pub2)
 
 	// Encrypt hello world
 	go func() {
@@ -31,7 +30,7 @@ func TestReadWriterPing(t *testing.T) {
 
 	// Make sure we have hello world back
 	if res := string(buf); res != "hello world\n" {
-		t.Fatalf("Unexpected result: %s != %s", res, "hello world")
+		t.Fatalf("Unexpected result: %v != %s", []byte(res), "hello world")
 	}
 }
 
@@ -80,6 +79,7 @@ func TestSecureWriter(t *testing.T) {
 
 }
 
+/*
 func TestSecureEchoServer(t *testing.T) {
 	// Create a random listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -184,3 +184,4 @@ func TestSecureDial(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+*/
