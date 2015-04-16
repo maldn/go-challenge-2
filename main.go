@@ -2,13 +2,13 @@ package main
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/codegangsta/cli"
 	"golang.org/x/crypto/nacl/box"
@@ -22,18 +22,22 @@ type SecureReader struct {
 // TODO pack nonce and actual encrypted message into one struct. encoding/binary
 func (sr *SecureReader) Read(p []byte) (n int, err error) {
 	// read encrypted message from onderlying reader
-	n, err = sr.r.Read(p)
+	var buf = make([]byte, 1024)
+	n, err = sr.r.Read(buf)
 	if err != nil {
 		return n, err
 	}
+	fmt.Printf("READ: %#v\n", buf[:n])
 	//first 24 bytes is our nonce, rest is message
 	var nonce [24]byte
-	copy(nonce[:], p[:24])
-	decrypted, success := box.Open(nil, p[24:n], &nonce, sr.pub, sr.priv)
+	copy(nonce[:], buf[:24])
+	decrypted, success := box.Open(nil, buf[24:n], &nonce, sr.pub, sr.priv)
+	fmt.Printf("READ:\n\tnonce: %#v\n\tenc: %#v\n\tplain: '%s'\n\t%#v\n\t%#v\n\n", nonce, buf[24:n], decrypted, sr.pub, sr.priv)
 	if success != true {
-		return 0, errors.New("Error decrypting message")
+		log.Fatalln("Error decrypting message")
 	}
 	copy(p, decrypted)
+	fmt.Printf("\n\n##########DECRYPT: %s\n%#v\n\n", p, decrypted)
 	return len(decrypted), err
 }
 
@@ -47,18 +51,13 @@ type SecureWriter struct {
 	priv, pub *[32]byte
 }
 
-type RWC struct {
-	SecureReader
-	SecureWriter
-}
-
 func (sw *SecureWriter) Write(p []byte) (n int, err error) {
 	//each "packet" starts with the nonce followed by the message
 	var nonce [24]byte
 	rand.Read(nonce[:])
 
 	encrypted := box.Seal(nonce[:], p, &nonce, sw.pub, sw.priv)
-	//fmt.Printf("WRITE: %v\n\t%v\n", encrypted, p)
+	fmt.Printf("Write:\n\tnonce: %#v\n\tenc: %#v\n\tplain: '%s'\n\t%#v\n\t%#v\n\n", nonce, encrypted[24:], p, sw.pub, sw.priv)
 	// write to underlying writer
 	return sw.w.Write(encrypted)
 }
@@ -69,26 +68,90 @@ func NewSecureWriter(w io.Writer, priv, pub *[32]byte) io.Writer {
 
 }
 
+type SecureConn struct {
+	conn io.ReadWriteCloser
+	r    io.Reader
+	w    io.Writer
+}
+
+func NewSecureConn(c io.ReadWriteCloser, priv, pub, peer_pub *[32]byte) io.ReadWriteCloser {
+	return &SecureConn{
+		conn: c,
+		r:    NewSecureReader(c, priv, pub),
+		w:    NewSecureWriter(c, priv, peer_pub),
+	}
+}
+
+func (rwc *SecureConn) Read(p []byte) (n int, err error) {
+	return rwc.r.Read(p)
+}
+
+func (rwc *SecureConn) Write(p []byte) (n int, err error) {
+	return rwc.w.Write(p)
+}
+
+func (rwc *SecureConn) Close() error {
+	return rwc.conn.Close()
+}
+
 // Dial generates a private/public key pair,
 // connects to the server, perform the handshake
 // and return a reader/writer.
 func Dial(addr string) (io.ReadWriteCloser, error) {
-	_, _, err := box.GenerateKey(rand.Reader)
+	client_pub, client_priv, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+
+	//fmt.Printf("Dial: sending client public key: %#v\n", client_pub)
+	n, err := conn.Write(client_pub[:])
+	if err != nil {
+		return nil, err
+	}
+
+	var server_pub [32]byte
+	n, err = conn.Read(server_pub[:])
+	if err != nil {
+		return nil, err
+	}
+	//fmt.Printf("Dial: got server public key: %#v\n", server_pub)
+	if n != 32 {
+		return nil, fmt.Errorf("excpected to read 32 bytes, got %d", n)
+	}
+	return NewSecureConn(conn, client_priv, client_pub, &server_pub), nil
 }
 
 // Serve starts a secure echo server on the given listener.
 func Serve(l net.Listener) error {
+	server_pub, server_priv, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			return err
 		}
 		go func(c net.Conn) {
+			//fmt.Printf("Serve: sending server public key: %#v\n", server_pub)
+			c.Write(server_pub[:])
 
+			var peer_pub [32]byte
+			c.Read(peer_pub[:])
+			//fmt.Printf("Serve: reading client public key: %#v\n", peer_pub)
+			sc := NewSecureConn(c, server_priv, server_pub, &peer_pub)
+			defer sc.Close()
+			//client_pub
+			//for {
+			//buf := make([]byte, 32*1024)
+			//n, err := sc.Read(buf)
+			//sc.Write
+			//echo
+			io.Copy(sc, sc)
+			//}
 		}(conn)
 	}
 }

@@ -3,16 +3,45 @@ package main
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
+	"net"
 	"testing"
 )
 
+/*
+func TestRealKeys(t *testing.T) {
+	bob_pub, bob_priv, _ := box.GenerateKey(rand.Reader)
+	alice_pub, alice_priv, _ := box.GenerateKey(rand.Reader)
+
+	//shared = box.Precompute(sharedKey, peersPublicKey, privateKey)
+	var nonce [24]byte
+	rand.Read(nonce[:])
+
+	bobs_message := "hi from bob"
+	bobs_box := box.Seal(nil, []byte(bobs_message), &nonce, alice_pub, bob_priv)
+	decrypted, success := box.Open(nil, bobs_box, &nonce, bob_pub, alice_priv)
+
+	if success != true || string(decrypted) != bobs_message {
+		t.Fatalf("error decrypting.\nexpected '%s'\ngot '%s'", string(decrypted), bobs_message)
+	}
+
+	alices_message := "re from alice"
+	alices_box := box.Seal(nil, []byte(alices_message), &nonce, bob_pub, alice_priv)
+	decrypted, success = box.Open(nil, alices_box, &nonce, alice_pub, bob_priv)
+
+	if success != true || string(decrypted) != alices_message {
+		t.Fatalf("error decrypting.\nexpected '%s'\ngot '%s'", string(decrypted), alices_message)
+	}
+}
+
 func TestReadWriterPing(t *testing.T) {
-	priv, pub := &[32]byte{'p', 'r', 'i', 'v'}, &[32]byte{'p', 'u', 'b'}
-	priv2, pub2 := &[32]byte{'p', 'r', 'i', '2'}, &[32]byte{'p', 'u', '2'}
+	//alice sends bob the message.
+	bob_pub, bob_priv, _ := box.GenerateKey(rand.Reader)
+	alice_pub, alice_priv, _ := box.GenerateKey(rand.Reader)
+
+	//priv, pub := &[32]byte{'p', 'r', 'i', 'v'}, &[32]byte{'p', 'u', 'b'}
 	r, w := io.Pipe()
-	secureR := NewSecureReader(r, priv, pub)
-	secureW := NewSecureWriter(w, priv2, pub2)
+	secureR := NewSecureReader(r, bob_priv, alice_pub)
+	secureW := NewSecureWriter(w, alice_priv, bob_pub)
 
 	// Encrypt hello world
 	go func() {
@@ -78,8 +107,7 @@ func TestSecureWriter(t *testing.T) {
 	}
 
 }
-
-/*
+*/
 func TestSecureEchoServer(t *testing.T) {
 	// Create a random listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -109,10 +137,12 @@ func TestSecureEchoServer(t *testing.T) {
 	}
 
 	if got := string(buf[:n]); got != expected {
+		t.Fatalf("Unexpected result:%#v\n", buf)
 		t.Fatalf("Unexpected result:\nGot:\t\t%s\nExpected:\t%s\n", got, expected)
 	}
 }
 
+/*
 func TestSecureServe(t *testing.T) {
 	// Create a random listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -124,10 +154,15 @@ func TestSecureServe(t *testing.T) {
 	// Start the server
 	go Serve(l)
 
-	conn, err := net.Dial("tcp", l.Addr().String())
+	conn, err := net.DialTimeout("tcp", l.Addr().String(), 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	unexpected := "hello world\n"
 	if _, err := fmt.Fprintf(conn, unexpected); err != nil {
 		t.Fatal(err)
@@ -137,6 +172,7 @@ func TestSecureServe(t *testing.T) {
 	if err != nil && err != io.EOF {
 		t.Fatal(err)
 	}
+
 	if got := string(buf[:n]); got == unexpected {
 		t.Fatalf("Unexpected result:\nGot raw data instead of serialized key")
 	}
