@@ -1,13 +1,17 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
-/*
 func TestRealKeys(t *testing.T) {
 	bob_pub, bob_priv, _ := box.GenerateKey(rand.Reader)
 	alice_pub, alice_priv, _ := box.GenerateKey(rand.Reader)
@@ -107,7 +111,7 @@ func TestSecureWriter(t *testing.T) {
 	}
 
 }
-*/
+
 func TestSecureEchoServer(t *testing.T) {
 	// Create a random listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -142,7 +146,6 @@ func TestSecureEchoServer(t *testing.T) {
 	}
 }
 
-/*
 func TestSecureServe(t *testing.T) {
 	// Create a random listener
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -220,4 +223,3 @@ func TestSecureDial(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-*/
